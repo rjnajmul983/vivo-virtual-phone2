@@ -1,0 +1,73 @@
+name: Build Vivo V2507A Virtual Container APK
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build-android-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Auto-Extract ZIP if Uploaded Directly from Phone
+        run: |
+          if [ ! -f "settings.gradle.kts" ]; then
+            ZIP_FILE=$(find . -maxdepth 2 -name "*.zip" | head -n 1)
+            if [ -n "$ZIP_FILE" ]; then
+              echo "Found ZIP file: $ZIP_FILE. Extracting..."
+              unzip -o "$ZIP_FILE" -d extracted_proj
+              if [ -d "extracted_proj/VivoV2507A_VirtualContainer" ]; then
+                cp -r extracted_proj/VivoV2507A_VirtualContainer/* .
+              else
+                cp -r extracted_proj/* .
+              fi
+              rm -rf extracted_proj
+            fi
+          fi
+          ls -la
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK & NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android 15/16 SDK, Build-Tools, NDK & CMake
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager --install "platforms;android-35" "build-tools;35.0.0" "ndk;27.0.12077973" "cmake;3.22.1"
+
+      - name: Setup Gradle 8.10.2
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Generate Persistent Signing Key (Preserves Data Across Updates)
+        run: |
+          mkdir -p app/keystore
+          if [ ! -f app/keystore/vcontainer_consistent.jks ]; then
+            keytool -genkey -v -keystore app/keystore/vcontainer_consistent.jks \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -alias vcontainer_key \
+              -storepass vivo2507a -keypass vivo2507a \
+              -dname "CN=VivoVirtualContainer, OU=MobileDev, O=VContainer, L=Dhaka, S=Dhaka, C=BD"
+          fi
+
+      - name: Build Debug & Signed Release APK
+        run: |
+          gradle assembleDebug assembleRelease --stacktrace
+
+      - name: Upload Compiled APK Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: VivoVirtualContainer-APK
+          path: |
+            app/build/outputs/apk/debug/*.apk
+            app/build/outputs/apk/release/*.apk
+            
